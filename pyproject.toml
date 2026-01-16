@@ -1,7 +1,7 @@
 [project]
-name = "mintlify-download"
+name = "docs-download"
 version = "0.1.0"
-description = "A tool to scrape and download Mintlify documentation sites to local Markdown files"
+description = "A tool to scrape and download documentation sites (Mintlify and GitBook) to local Markdown files"
 readme = "README.md"
 authors = [
     { name = "Bob Liu", email = "akagi201@gmail.com" }
@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 mintlify-download = "mintlify_download.cli:main"
+gitbook-download = "gitbook_download.cli:main"
 
 [dependency-groups]
 dev = [

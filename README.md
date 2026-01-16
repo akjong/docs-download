@@ -1,13 +1,13 @@
-# Mintlify Documentation Scraper
+# Documentation Scraper
 
-A powerful tool to scrape and download Mintlify documentation sites to local Markdown files. This tool automatically discovers all documentation pages and downloads their source code while preserving the directory structure.
+A powerful tool to scrape and download documentation sites (Mintlify and GitBook) to local Markdown files. This tool automatically discovers all documentation pages and downloads their source code while preserving the directory structure.
 
 ## Features
 
 - **🔍 Automatic URL Discovery**: Starts from a base URL and recursively crawls all documentation pages
 - **📁 Structure Preservation**: Maintains the exact directory structure from the website
 - **⚡ High Performance**: Asynchronous downloads with configurable concurrency
-- **🔄 Smart Source Detection**: Automatically tries `.mdx` and `.md` suffixes to get source code
+- **🔄 Smart Source Detection**: Automatically tries `.mdx` and `.md` suffixes to get source code (Mintlify), or parses HTML for GitBook
 - **🎯 Flexible Output**: Force all files to `.md` extension or keep original extensions
 - **📈 Incremental Downloads**: Skip existing files to resume interrupted downloads
 - **🛡️ Content Validation**: Verifies downloaded content is valid Markdown (not HTML error pages)
@@ -16,10 +16,10 @@ A powerful tool to scrape and download Mintlify documentation sites to local Mar
 
 ## How It Works
 
-Mintlify documentation sites have a unique feature: you can access the raw Markdown source by appending `.md` or `.mdx` to any documentation URL. This tool leverages this feature to:
+Documentation sites like Mintlify and GitBook have features to access raw Markdown source. This tool leverages these features to:
 
-1. **Discover Pages**: Parse HTML pages and `mint.json` configuration to find all documentation links
-2. **Download Sources**: Try `{url}.mdx` first, then `{url}.md` if that fails
+1. **Discover Pages**: Parse HTML pages and configuration files to find all documentation links
+2. **Download Sources**: For Mintlify, try `{url}.mdx` first, then `{url}.md` if that fails; for GitBook, parse HTML to extract content
 3. **Validate Content**: Ensure downloaded content is actual Markdown, not HTML error pages
 4. **Preserve Structure**: Map URL paths to local directory structure
 5. **Handle Concurrency**: Use asyncio for efficient parallel downloads
@@ -35,27 +35,42 @@ Mintlify documentation sites have a unique feature: you can access the raw Markd
 
 ```bash
 # Clone the repository
-git clone https://github.com/akjong/mintlify-download.git
-cd mintlify-download
+git clone https://github.com/akjong/docs-download.git
+cd docs-download
 
-# Install dependencies
+# Install dependencies and the package
 uv sync
+
+# The commands mintlify-download and gitbook-download are now available system-wide
 ```
 
 ### Install with pip
 
 ```bash
 # Clone the repository
-git clone https://github.com/akjong/mintlify-download.git
-cd mintlify-download
+git clone https://github.com/akjong/docs-download.git
+cd docs-download
 
-# Install dependencies
-pip install -r requirements.txt
+# Install the package in editable mode
+pip install -e .
+
+# The commands mintlify-download and gitbook-download are now available system-wide
+```
+
+### Verify Installation
+
+After installation, verify the tools are available:
+
+```bash
+mintlify-download --help
+gitbook-download --help
 ```
 
 ## Usage
 
-### Basic Usage
+### Mintlify Documentation
+
+#### Basic Usage
 
 ```bash
 # Download documentation to default directory
@@ -65,7 +80,7 @@ uv run mintlify-download https://docs.example.com/
 python -m mintlify_download.cli https://docs.example.com/
 ```
 
-### Command Line Options
+#### Command Line Options
 
 | Parameter | Short | Description | Default | Example |
 |-----------|-------|-------------|---------|---------|
@@ -73,6 +88,28 @@ python -m mintlify_download.cli https://docs.example.com/
 | `--output` | `-o` | Output directory for downloaded files | `./downloaded_docs` | `-o ./my-docs` |
 | `--force-md` | `-f` | Force all files to be saved with `.md` extension (converts `.mdx` to `.md`) | `False` | `--force-md` |
 | `--concurrency` | `-c` | Number of concurrent download workers | `10` | `--concurrency 20` |
+| `--skip-existing` | `-s` | Skip downloading files that already exist in output directory | `False` | `--skip-existing` |
+| `--verbose` | `-v` | Enable verbose logging output | `False` | `--verbose` |
+
+### GitBook Documentation
+
+#### Basic Usage
+
+```bash
+# Download documentation to default directory
+uv run gitbook-download https://docs.example.com/
+
+# Or with pip
+python -m gitbook_download.cli https://docs.example.com/
+```
+
+#### Command Line Options
+
+| Parameter | Short | Description | Default | Example |
+|-----------|-------|-------------|---------|---------|
+| `url` | - | **Required.** Base URL of the GitBook documentation site | - | `https://docs.example.com/guide/` |
+| `--output` | `-o` | Output directory for downloaded files | `./downloaded_docs` | `-o ./my-docs` |
+| `--concurrency` | `-c` | Number of concurrent download workers | `5` | `--concurrency 10` |
 | `--skip-existing` | `-s` | Skip downloading files that already exist in output directory | `False` | `--skip-existing` |
 | `--verbose` | `-v` | Enable verbose logging output | `False` | `--verbose` |
 
@@ -113,7 +150,9 @@ Enables detailed logging output, showing which URLs are being processed, downloa
 
 ## Examples
 
-### Download Orderly Network Documentation
+### Download Mintlify Documentation
+
+#### Download Orderly Network Documentation
 
 ```bash
 # Download with force .md conversion and verbose output
@@ -123,7 +162,7 @@ uv run mintlify-download https://orderly.network/docs/build-on-omnichain \
   --verbose
 ```
 
-### Resume Interrupted Download
+#### Resume Interrupted Download
 
 ```bash
 # Skip existing files to resume download
@@ -132,7 +171,7 @@ uv run mintlify-download https://docs.example.com/ \
   --skip-existing
 ```
 
-### High-Speed Download
+#### High-Speed Download
 
 ```bash
 # Use more workers for faster download
@@ -141,31 +180,49 @@ uv run mintlify-download https://docs.example.com/ \
   --output ./fast-download
 ```
 
+### Download GitBook Documentation
+
+#### Download Hyperliquid Documentation
+
+```bash
+# Download with verbose output
+uv run gitbook-download https://hyperliquid.gitbook.io/hyperliquid-docs \
+  --output ./hyperliquid-docs \
+  --verbose
+```
+
+#### Resume Interrupted Download
+
+```bash
+# Skip existing files to resume download
+uv run gitbook-download https://docs.example.com/ \
+  --output ./docs \
+  --skip-existing
+```
+
 ## Project Logic
 
 ### URL Discovery Process
 
 1. **Start with Base URL**: Add the provided base URL to the processing queue
-2. **Try mint.json**: Attempt to fetch and parse `mint.json` for complete page navigation
-3. **HTML Parsing**: Parse HTML pages to extract internal links
-4. **Link Filtering**: Only keep links that:
+2. **Parse Configuration/HTML**: Attempt to fetch and parse configuration files (mint.json for Mintlify) or HTML pages to find all documentation links
+3. **Link Filtering**: Only keep links that:
    - Belong to the same domain
    - Are under the base URL path
    - Don't match excluded patterns (images, API routes, etc.)
-5. **Deduplication**: Use a set to avoid processing the same URL multiple times
+4. **Deduplication**: Use a set to avoid processing the same URL multiple times
 
 ### Source Download Strategy
 
 For each discovered URL, the tool:
 
-1. **Try .mdx First**: Attempt to download `{url}.mdx`
-2. **Fallback to .md**: If .mdx fails, try `{url}.md`
-3. **Content Validation**: Check that the response:
+1. **Try Source Access**: For Mintlify, try `{url}.mdx` first, then `{url}.md`; for GitBook, parse HTML content
+2. **Content Validation**: Check that the response:
    - Has HTTP 200 status
    - Contains valid Markdown content (not HTML error pages)
    - Has appropriate content-type headers
-4. **Path Mapping**: Convert URL path to local file path
-5. **File Saving**: Write content to appropriate location with correct extension
+3. **Path Mapping**: Convert URL path to local file path
+4. **File Saving**: Write content to appropriate location with correct extension
 
 ### Concurrency Model
 
