@@ -17,6 +17,7 @@ dependencies = [
 [project.scripts]
 mintlify-download = "mintlify_download.cli:main"
 gitbook-download = "gitbook_download.cli:main"
+mkdocs-download = "mkdocs_download.cli:main"
 
 [dependency-groups]
 dev = [

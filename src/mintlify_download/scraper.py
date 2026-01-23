@@ -1,6 +1,7 @@
 """Core scraper module for Mintlify documentation sites."""
 
 import asyncio
+import hashlib
 import os
 import re
 from dataclasses import dataclass
@@ -35,6 +36,8 @@ class ScraperStats:
     downloaded: int = 0
     skipped: int = 0
     failed: int = 0
+    images_downloaded: int = 0
+    images_failed: int = 0
 
 
 class MintlifyScraper:
@@ -54,6 +57,7 @@ class MintlifyScraper:
         self.visited_urls: set[str] = set()
         self.urls_to_visit: asyncio.Queue[str] = asyncio.Queue()
         self.downloaded_paths: set[str] = set()
+        self.downloaded_images: set[str] = set()
 
         # Semaphore for concurrency control
         self.semaphore = asyncio.Semaphore(config.concurrency)
@@ -121,6 +125,63 @@ class MintlifyScraper:
             file_path += save_ext
 
         return file_path
+
+    def _get_image_local_path(self, img_url: str) -> str:
+        """Get local path for an image URL."""
+        parsed = urlparse(img_url)
+        path = parsed.path
+
+        # Get the filename from the path
+        filename = os.path.basename(path)
+        if not filename or "." not in filename:
+            # Generate a filename from URL hash
+            url_hash = hashlib.md5(img_url.encode()).hexdigest()[:8]
+            ext = ".png"
+            if "." in path:
+                ext = os.path.splitext(path)[1] or ".png"
+            filename = f"image_{url_hash}{ext}"
+
+        # Put images in an 'img' subdirectory
+        return f"img/{filename}"
+
+    async def _download_image(self, client: httpx.AsyncClient, url: str, local_path: str) -> bool:
+        """Download an image to local path."""
+        if url in self.downloaded_images:
+            return True
+
+        try:
+            async with self.semaphore:
+                response = await client.get(url, timeout=self.config.timeout)
+
+            if response.status_code != 200:
+                if self.config.verbose:
+                    console.print(
+                        f"[yellow]Failed to download image ({response.status_code}): {url}[/yellow]"
+                    )
+                self.stats.images_failed += 1
+                return False
+
+            # Create directory if needed
+            full_path = os.path.join(self.config.output_dir, local_path)
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+            # Save image
+            with open(full_path, "wb") as f:
+                f.write(response.content)
+
+            self.downloaded_images.add(url)
+            self.stats.images_downloaded += 1
+
+            if self.config.verbose:
+                console.print(f"[dim]Downloaded image: {full_path}[/dim]")
+
+            return True
+
+        except Exception as e:
+            if self.config.verbose:
+                console.print(f"[yellow]Error downloading image {url}: {e}[/yellow]")
+            self.stats.images_failed += 1
+            return False
 
     async def _fetch_mint_json(self, client: httpx.AsyncClient) -> list[str]:
         """Try to fetch mint.json to discover all pages."""
@@ -218,6 +279,63 @@ class MintlifyScraper:
 
         return links
 
+    async def _extract_images_from_content(
+        self, client: httpx.AsyncClient, content: bytes, page_url: str
+    ) -> bytes:
+        """Extract images from content and download them, replacing URLs with local paths."""
+        content_str = content.decode("utf-8", errors="ignore")
+
+        # Find all image references in markdown format: ![alt](url)
+        img_pattern = r"!\[([^\]]*)\]\(([^)]+)\)"
+        matches = re.findall(img_pattern, content_str)
+
+        for alt, img_url in matches:
+            if not img_url:
+                continue
+
+            # Make absolute URL
+            if not img_url.startswith(("http://", "https://", "data:")):
+                img_url_abs = urljoin(page_url, img_url)
+            else:
+                img_url_abs = img_url
+
+            # Skip data URLs
+            if img_url_abs.startswith("data:"):
+                continue
+
+            # Get local path for the image
+            local_img_path = self._get_image_local_path(img_url_abs)
+
+            # Download the image
+            await self._download_image(client, img_url_abs, local_img_path)
+
+            # Replace URL in content
+            content_str = content_str.replace(f"![{alt}]({img_url})", f"![{alt}]({local_img_path})")
+
+        # Also find HTML img tags
+        soup = BeautifulSoup(content_str, "html.parser")
+        for img in soup.find_all("img"):
+            src = img.get("src", "")
+            if not src or src.startswith("data:"):
+                continue
+
+            # Make absolute URL
+            if not src.startswith(("http://", "https://")):
+                src_abs = urljoin(page_url, src)
+            else:
+                src_abs = src
+
+            # Get local path for the image
+            local_img_path = self._get_image_local_path(src_abs)
+
+            # Download the image
+            await self._download_image(client, src_abs, local_img_path)
+
+            # Replace src in the img tag
+            img["src"] = local_img_path
+
+        return str(soup).encode("utf-8")
+
     async def _try_download_source(
         self, client: httpx.AsyncClient, url: str
     ) -> tuple[bytes, str] | None:
@@ -247,6 +365,9 @@ class MintlifyScraper:
                     content_type = response.headers.get("content-type", "")
                     if "text/html" in content_type:
                         continue
+
+                    # Process images in the content
+                    content = await self._extract_images_from_content(client, content, source_url)
 
                     return content, ext
 
@@ -390,5 +511,7 @@ class MintlifyScraper:
         console.print(f"  Downloaded: {self.stats.downloaded} files")
         console.print(f"  Skipped: {self.stats.skipped} files")
         console.print(f"  Failed: {self.stats.failed} pages")
+        console.print(f"  Images downloaded: {self.stats.images_downloaded}")
+        console.print(f"  Images failed: {self.stats.images_failed}")
 
         return self.stats

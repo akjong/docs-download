@@ -1,4 +1,4 @@
-"""Core scraper module for GitBook documentation sites."""
+"""Core scraper module for MkDocs documentation sites."""
 
 import asyncio
 import hashlib
@@ -18,7 +18,7 @@ console = Console()
 
 @dataclass
 class ScraperConfig:
-    """Configuration for the GitBook scraper."""
+    """Configuration for the MkDocs scraper."""
 
     base_url: str
     output_dir: str = "./downloaded_docs"
@@ -41,7 +41,7 @@ class ScraperStats:
 
 
 class HTMLToMarkdownConverter:
-    """Convert HTML content to Markdown format."""
+    """Convert HTML content to Markdown format for MkDocs sites."""
 
     def __init__(self, base_url: str, output_dir: str):
         self.base_url = base_url
@@ -84,17 +84,23 @@ class HTMLToMarkdownConverter:
 
         # Get the filename from the path
         filename = os.path.basename(path)
-        if not filename or "." not in filename:
+        if not filename:
             # Generate a filename from URL hash
             url_hash = hashlib.md5(img_url.encode()).hexdigest()[:8]
-            ext = ".png"
-            # Try to get extension from content-type or URL
-            if "." in path:
-                ext = os.path.splitext(path)[1] or ".png"
-            filename = f"image_{url_hash}{ext}"
+            filename = f"image_{url_hash}.png"
 
-        # Put images in an 'img' subdirectory
-        return f"img/{filename}"
+        # Get the base path from base_url
+        base_parsed = urlparse(self.base_url)
+        base_path = base_parsed.path.rstrip("/")
+
+        # Try to preserve the original image path structure
+        if path.startswith(base_path):
+            relative_img_path = path[len(base_path) :].lstrip("/")
+        else:
+            # Keep the path structure from the URL
+            relative_img_path = path.lstrip("/")
+
+        return relative_img_path
 
     def _process_image(self, element: Tag, lines: list) -> None:
         """Process an image element."""
@@ -139,7 +145,7 @@ class HTMLToMarkdownConverter:
         tag_name = element.name.lower() if element.name else ""
 
         # Skip unwanted elements
-        if tag_name in ["script", "style", "nav", "aside", "footer", "button", "svg"]:
+        if tag_name in ["script", "style", "nav", "footer", "button", "svg"]:
             return
 
         # Handle images
@@ -150,14 +156,16 @@ class HTMLToMarkdownConverter:
         # Handle different tags
         if tag_name in ["h1", "h2", "h3", "h4", "h5", "h6"]:
             level = int(tag_name[1])
-            # Remove anchor links (contain hashtag icon) before getting text
-            for anchor in element.find_all("a"):
+            # Remove anchor links and headerlink (MkDocs specific)
+            for anchor in element.find_all("a", class_="headerlink"):
                 anchor.decompose()
+            for anchor in element.find_all("a"):
+                if anchor.get("class") and "headerlink" in anchor.get("class", []):
+                    anchor.decompose()
             text = self._get_text(element).strip()
+            # Remove paragraph symbol (¶) commonly used in MkDocs
+            text = text.replace("¶", "").strip()
             if text:
-                # Remove "Direct link to heading" prefix and hashtag
-                text = re.sub(r"^Direct link to heading\s*", "", text)
-                text = re.sub(r"^hashtag\s*", "", text)
                 lines.append(f"\n{'#' * level} {text}\n")
 
         elif tag_name == "p":
@@ -180,9 +188,14 @@ class HTMLToMarkdownConverter:
                 classes = code_elem.get("class", [])
                 lang = ""
                 for cls in classes:
-                    if isinstance(cls, str) and cls.startswith("language-"):
-                        lang = cls.replace("language-", "")
-                        break
+                    if isinstance(cls, str):
+                        if cls.startswith("language-"):
+                            lang = cls.replace("language-", "")
+                            break
+                        # MkDocs/Pygments style
+                        if cls.startswith("highlight-"):
+                            lang = cls.replace("highlight-", "")
+                            break
                 lines.append(f"\n```{lang}\n{code_text}\n```\n")
             else:
                 lines.append(f"\n```\n{element.get_text()}\n```\n")
@@ -217,20 +230,40 @@ class HTMLToMarkdownConverter:
         elif tag_name == "table":
             self._process_table(element, lines)
 
+        # Handle MkDocs admonitions (note, warning, tip, etc.)
+        elif tag_name == "div" and element.get("class"):
+            classes = element.get("class", [])
+            if isinstance(classes, list) and "admonition" in classes:
+                self._process_admonition(element, lines)
+            else:
+                # Container elements - process children
+                for child in element.children:
+                    self._process_element(child, lines, depth + 1)
+
         elif tag_name == "a":
+            # Check if this is a glightbox image link (MkDocs image lightbox)
+            classes = element.get("class", [])
+            if "glightbox" in classes:
+                # This is an image lightbox, process the image inside
+                img = element.find("img")
+                if img:
+                    self._process_image(img, lines)
+                return
+
+            href = element.get("href", "")
+            text = self._get_text(element).strip()
+            # Skip navigation links and headerlinks
+            if "headerlink" in classes:
+                return
+            if "¶" in text:
+                return
+
             # Check if there's an image inside the link
             img = element.find("img")
             if img:
                 self._process_image(img, lines)
                 return
 
-            href = element.get("href", "")
-            text = self._get_text(element).strip()
-            # Skip navigation links
-            if "Previous" in text or "Next" in text or "chevron" in text.lower():
-                return
-            # Remove icon text
-            text = re.sub(r"(arrow-up-right|arrow-right|external-link)", "", text).strip()
             if href and text:
                 if not href.startswith(("http://", "https://", "#", "mailto:")):
                     href = urljoin(self.base_url, href)
@@ -253,7 +286,7 @@ class HTMLToMarkdownConverter:
                 if caption:
                     lines.append(f"*{caption}*\n")
 
-        elif tag_name in ["div", "section", "article", "main", "span"]:
+        elif tag_name in ["section", "article", "main", "span", "aside"]:
             # Container elements - process children
             for child in element.children:
                 self._process_element(child, lines, depth + 1)
@@ -287,6 +320,14 @@ class HTMLToMarkdownConverter:
         elif tag_name in ["em", "i"]:
             return f"*{element.get_text()}*"
         elif tag_name == "a":
+            # Check if this is a glightbox image link (MkDocs image lightbox)
+            classes = element.get("class", [])
+            if isinstance(classes, list) and "glightbox" in classes:
+                img = element.find("img")
+                if img:
+                    return self._inline_image(img)
+                return ""
+
             # Check if there's an image inside the link
             img = element.find("img")
             if img:
@@ -294,8 +335,6 @@ class HTMLToMarkdownConverter:
 
             href = element.get("href", "")
             text = element.get_text().strip()
-            # Remove icon text
-            text = re.sub(r"(arrow-up-right|arrow-right|external-link)", "", text).strip()
             if href and text:
                 if not href.startswith(("http://", "https://", "#", "mailto:")):
                     href = urljoin(self.base_url, href)
@@ -330,7 +369,7 @@ class HTMLToMarkdownConverter:
                 parts.append(str(child).strip())
             elif isinstance(child, Tag):
                 if child.name in ["ul", "ol"]:
-                    # Nested list - skip for now, could implement indentation
+                    # Nested list - skip for now
                     continue
                 parts.append(self._inline_element(child))
         return " ".join(parts).strip()
@@ -358,9 +397,55 @@ class HTMLToMarkdownConverter:
 
         lines.append("")
 
+    def _process_admonition(self, element: Tag, lines: list) -> None:
+        """Process MkDocs admonition (note, warning, tip, etc.)."""
+        classes = element.get("class", [])
+        admonition_type = "note"
 
-class GitBookScraper:
-    """Scraper for GitBook documentation sites."""
+        # Find admonition type from classes
+        type_mapping = {
+            "note": "Note",
+            "warning": "Warning",
+            "tip": "Tip",
+            "info": "Info",
+            "danger": "Danger",
+            "success": "Success",
+            "question": "Question",
+            "abstract": "Abstract",
+            "example": "Example",
+            "quote": "Quote",
+            "bug": "Bug",
+            "failure": "Failure",
+        }
+
+        for cls in classes:
+            if cls in type_mapping:
+                admonition_type = type_mapping[cls]
+                break
+
+        # Get title
+        title_elem = element.find("p", class_="admonition-title")
+        title = title_elem.get_text().strip() if title_elem else admonition_type
+
+        # Get content
+        content_parts = []
+        for child in element.children:
+            if isinstance(child, Tag):
+                if "admonition-title" not in (child.get("class") or []):
+                    content_parts.append(child.get_text().strip())
+
+        content = " ".join(content_parts)
+
+        # Format as blockquote with title
+        lines.append(f"\n> **{title}**")
+        for line in content.split("\n"):
+            if line.strip():
+                lines.append(f"> {line.strip()}")
+        lines.append("")
+
+
+class MkDocsScraper:
+    """Scraper for MkDocs documentation sites."""
 
     def __init__(self, config: ScraperConfig):
         self.config = config
@@ -400,6 +485,8 @@ class GitBookScraper:
         # Handle trailing slash
         if relative_path.endswith("/"):
             relative_path = relative_path.rstrip("/")
+            if not relative_path:
+                relative_path = "index"
 
         # Build full path
         file_path = os.path.join(self.config.output_dir, relative_path)
@@ -449,48 +536,64 @@ class GitBookScraper:
             return False
 
     async def _fetch_sitemap_urls(self, client: httpx.AsyncClient) -> list[str]:
-        """Fetch all page URLs from GitBook sitemaps."""
+        """Fetch all page URLs from MkDocs sitemap."""
         urls = []
 
-        # Try to fetch main sitemap index
+        # Try to fetch sitemap.xml
         sitemap_url = f"{self.base_url}/sitemap.xml"
 
-        try:
-            response = await client.get(sitemap_url, timeout=self.config.timeout)
-            if response.status_code != 200:
+        # Also try parent domain sitemap if base_url has a subpath
+        parsed = urlparse(self.base_url)
+        parent_sitemap_url = f"{parsed.scheme}://{parsed.netloc}/sitemap.xml"
+
+        sitemap_urls_to_try = [sitemap_url]
+        if sitemap_url != parent_sitemap_url:
+            sitemap_urls_to_try.append(parent_sitemap_url)
+
+        for smap_url in sitemap_urls_to_try:
+            try:
+                response = await client.get(smap_url, timeout=self.config.timeout)
+                if response.status_code != 200:
+                    if self.config.verbose:
+                        console.print(f"[dim]Could not fetch sitemap: {smap_url}[/dim]")
+                    continue
+
+                # Parse sitemap
+                root = ElementTree.fromstring(response.content)
+
+                # Handle namespace
+                ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+
+                # Check if this is a sitemap index or urlset
+                if root.tag.endswith("sitemapindex"):
+                    # This is a sitemap index, fetch each child sitemap
+                    sitemap_locs = root.findall(".//sm:loc", ns)
+                    for loc in sitemap_locs:
+                        if loc.text:
+                            child_urls = await self._fetch_child_sitemap(client, loc.text)
+                            urls.extend(child_urls)
+                else:
+                    # This is a direct urlset
+                    loc_elements = root.findall(".//sm:loc", ns)
+                    for loc in loc_elements:
+                        if loc.text:
+                            urls.append(loc.text)
+
+                if urls:
+                    if self.config.verbose:
+                        console.print(
+                            f"[green]Found {len(urls)} URLs from sitemap: {smap_url}[/green]"
+                        )
+                    break
+
+            except Exception as e:
                 if self.config.verbose:
-                    console.print(f"[yellow]Could not fetch sitemap: {sitemap_url}[/yellow]")
-                return urls
-
-            # Parse sitemap index
-            root = ElementTree.fromstring(response.content)
-
-            # Handle namespace
-            ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-
-            # Check if this is a sitemap index or urlset
-            if root.tag.endswith("sitemapindex"):
-                # This is a sitemap index, fetch each child sitemap
-                sitemap_locs = root.findall(".//sm:loc", ns)
-                for loc in sitemap_locs:
-                    if loc.text and "sitemap-pages.xml" in loc.text:
-                        child_urls = await self._fetch_sitemap_pages(client, loc.text)
-                        urls.extend(child_urls)
-            else:
-                # This is a direct urlset
-                loc_elements = root.findall(".//sm:loc", ns)
-                for loc in loc_elements:
-                    if loc.text:
-                        urls.append(loc.text)
-
-        except Exception as e:
-            if self.config.verbose:
-                console.print(f"[yellow]Error fetching sitemap: {e}[/yellow]")
+                    console.print(f"[yellow]Error fetching sitemap {smap_url}: {e}[/yellow]")
 
         return urls
 
-    async def _fetch_sitemap_pages(self, client: httpx.AsyncClient, sitemap_url: str) -> list[str]:
-        """Fetch URLs from a sitemap-pages.xml file."""
+    async def _fetch_child_sitemap(self, client: httpx.AsyncClient, sitemap_url: str) -> list[str]:
+        """Fetch URLs from a child sitemap."""
         urls = []
 
         try:
@@ -516,7 +619,7 @@ class GitBookScraper:
         return urls
 
     async def _extract_links_from_html(self, client: httpx.AsyncClient, url: str) -> list[str]:
-        """Fallback: Extract internal links from HTML page."""
+        """Fallback: Extract internal links from HTML page navigation."""
         links = []
 
         try:
@@ -526,8 +629,15 @@ class GitBookScraper:
 
             soup = BeautifulSoup(response.text, "html.parser")
 
-            # Find sidebar navigation
-            nav = soup.find("nav") or soup.find("aside") or soup.find("complementary")
+            # MkDocs Material theme uses nav with class md-nav for sidebar
+            nav = soup.find("nav", class_="md-nav--primary")
+            if not nav:
+                nav = soup.find("nav", class_="md-nav")
+            if not nav:
+                nav = soup.find("nav")
+            if not nav:
+                nav = soup.find("aside")
+
             search_area = nav if nav else soup
 
             for a_tag in search_area.find_all("a", href=True):
@@ -537,14 +647,23 @@ class GitBookScraper:
                 if href.startswith(("http://", "https://")):
                     if self.base_host not in href:
                         continue
-                    links.append(href)
+                    # Check if URL is under base path
+                    parsed_href = urlparse(href)
+                    if not parsed_href.path.startswith(self.base_path):
+                        continue
+                    links.append(href.split("#")[0])  # Remove fragment
                 elif href.startswith(("#", "javascript:", "mailto:", "tel:")):
                     continue
                 elif href.startswith("/"):
-                    # Relative URL
+                    # Absolute path
                     full_url = f"https://{self.base_host}{href}"
                     if self.base_path in href:
-                        links.append(full_url)
+                        links.append(full_url.split("#")[0])
+                else:
+                    # Relative path
+                    full_url = urljoin(url, href)
+                    if self.base_path in full_url:
+                        links.append(full_url.split("#")[0])
 
         except Exception as e:
             if self.config.verbose:
@@ -560,41 +679,52 @@ class GitBookScraper:
         title = ""
         h1 = soup.find("h1")
         if h1:
-            title = h1.get_text().strip()
+            # Clean up title - remove paragraph mark
+            title = h1.get_text().strip().replace("¶", "").strip()
         elif soup.title:
-            title = soup.title.get_text().split("|")[0].strip()
+            title = soup.title.get_text().split("|")[0].split("-")[0].strip()
 
-        # Find main content
-        main = soup.find("main")
+        # Find main content - MkDocs Material theme uses article with class md-content__inner
+        main = soup.find("article", class_="md-content__inner")
         if not main:
             main = soup.find("article")
+        if not main:
+            main = soup.find("div", class_="md-content")
+        if not main:
+            main = soup.find("main")
         if not main:
             main = soup.find("div", {"role": "main"})
 
         if main:
             # Remove unwanted elements
-            for elem in main.find_all(["nav", "aside", "footer", "button"]):
+            for elem in main.find_all(["nav", "footer", "button"]):
                 elem.decompose()
 
-            # Remove "Previous/Next" navigation
-            for link in main.find_all("a"):
-                link_text = link.get_text()
-                if "Previous" in link_text or "Next" in link_text:
-                    parent = link.find_parent()
-                    if parent:
-                        parent.decompose()
+            # Remove edit links (common in MkDocs)
+            for elem in main.find_all("a", class_="md-content__button"):
+                elem.decompose()
 
-            # Remove "Last updated" text
-            for elem in main.find_all(["p", "div", "span"]):
-                if "Last updated" in elem.get_text():
+            # Remove "Last updated" metadata
+            for elem in main.find_all(["p", "div", "span", "small"]):
+                text = elem.get_text().lower()
+                if "last updated" in text or "last modified" in text:
                     elem.decompose()
 
-            # Remove copy buttons
-            for elem in main.find_all(attrs={"aria-label": "Copy"}):
+            # Remove navigation footer (prev/next)
+            for elem in main.find_all(class_="md-footer-nav"):
                 elem.decompose()
-            for elem in main.find_all(string=re.compile(r"^Copy$")):
-                if elem.parent:
-                    elem.parent.decompose()
+            for elem in main.find_all("nav", class_="md-footer__inner"):
+                elem.decompose()
+
+            # Remove copy buttons
+            for elem in main.find_all(attrs={"data-clipboard-target": True}):
+                elem.decompose()
+            for elem in main.find_all("button"):
+                elem.decompose()
+
+            # Remove source code links
+            for elem in main.find_all("a", class_="md-source"):
+                elem.decompose()
 
         return title, main
 
@@ -671,7 +801,7 @@ class GitBookScraper:
 
     async def run(self) -> ScraperStats:
         """Run the scraper."""
-        console.print("[bold blue]GitBook Scraper[/bold blue]")
+        console.print("[bold blue]MkDocs Scraper[/bold blue]")
         console.print(f"  Base URL: {self.base_url}")
         console.print(f"  Output: {self.config.output_dir}")
         console.print(f"  Concurrency: {self.config.concurrency}")
@@ -700,8 +830,11 @@ class GitBookScraper:
                 urls = list(set(urls))
 
             # Always include base URL
-            if self.base_url not in urls:
+            if self.base_url not in urls and f"{self.base_url}/" not in urls:
                 urls.insert(0, self.base_url)
+
+            # Remove duplicates and sort
+            urls = sorted(set(urls))
 
             self.stats.discovered = len(urls)
             console.print(f"[green]Found {len(urls)} pages to download[/green]")
