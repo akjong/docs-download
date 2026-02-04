@@ -1,13 +1,13 @@
 # Documentation Scraper
 
-A powerful tool to scrape and download documentation sites (Mintlify and GitBook) to local Markdown files. This tool automatically discovers all documentation pages and downloads their source code while preserving the directory structure.
+A powerful tool to scrape and download documentation sites (Mintlify, GitBook, and ReadMe.com) to local Markdown files. This tool automatically discovers all documentation pages and downloads their source code while preserving the directory structure.
 
 ## Features
 
 - **🔍 Automatic URL Discovery**: Starts from a base URL and recursively crawls all documentation pages
 - **📁 Structure Preservation**: Maintains the exact directory structure from the website
 - **⚡ High Performance**: Asynchronous downloads with configurable concurrency
-- **🔄 Smart Source Detection**: Automatically tries `.mdx` and `.md` suffixes to get source code (Mintlify), or parses HTML for GitBook
+- **🔄 Smart Source Detection**: Automatically tries `.mdx` and `.md` suffixes to get source code (Mintlify), or parses HTML for GitBook and ReadMe.com
 - **🎯 Flexible Output**: Force all files to `.md` extension or keep original extensions
 - **📈 Incremental Downloads**: Skip existing files to resume interrupted downloads
 - **🛡️ Content Validation**: Verifies downloaded content is valid Markdown (not HTML error pages)
@@ -64,6 +64,7 @@ After installation, verify the tools are available:
 ```bash
 mintlify-download --help
 gitbook-download --help
+readme-download --help
 ```
 
 ## Usage
@@ -108,6 +109,28 @@ python -m gitbook_download.cli https://docs.example.com/
 | Parameter | Short | Description | Default | Example |
 |-----------|-------|-------------|---------|---------|
 | `url` | - | **Required.** Base URL of the GitBook documentation site | - | `https://docs.example.com/guide/` |
+| `--output` | `-o` | Output directory for downloaded files | `./downloaded_docs` | `-o ./my-docs` |
+| `--concurrency` | `-c` | Number of concurrent download workers | `5` | `--concurrency 10` |
+| `--skip-existing` | `-s` | Skip downloading files that already exist in output directory | `False` | `--skip-existing` |
+| `--verbose` | `-v` | Enable verbose logging output | `False` | `--verbose` |
+
+### ReadMe.com Documentation
+
+#### Basic Usage
+
+```bash
+# Download documentation to default directory
+uv run readme-download https://developer.example.com/reference/
+
+# Or with pip
+python -m readme_download.cli https://developer.example.com/reference/
+```
+
+#### Command Line Options
+
+| Parameter | Short | Description | Default | Example |
+|-----------|-------|-------------|---------|---------|
+| `url` | - | **Required.** Base URL of the ReadMe.com documentation site | - | `https://developer.example.com/reference/` |
 | `--output` | `-o` | Output directory for downloaded files | `./downloaded_docs` | `-o ./my-docs` |
 | `--concurrency` | `-c` | Number of concurrent download workers | `5` | `--concurrency 10` |
 | `--skip-existing` | `-s` | Skip downloading files that already exist in output directory | `False` | `--skip-existing` |
@@ -196,6 +219,26 @@ uv run gitbook-download https://hyperliquid.gitbook.io/hyperliquid-docs \
 ```bash
 # Skip existing files to resume download
 uv run gitbook-download https://docs.example.com/ \
+  --output ./docs \
+  --skip-existing
+```
+
+### Download ReadMe.com Documentation
+
+#### Download RISEx API Documentation
+
+```bash
+# Download with verbose output
+uv run readme-download https://developer.rise.trade/reference/ \
+  --output ./rises-api \
+  --verbose
+```
+
+#### Resume Interrupted Download
+
+```bash
+# Skip existing files to resume download
+uv run readme-download https://developer.example.com/reference/ \
   --output ./docs \
   --skip-existing
 ```
