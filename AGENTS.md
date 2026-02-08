@@ -1,10 +1,10 @@
 # Agent Guidelines for docs-download
 
-This document provides coding guidelines and development commands for agentic coding assistants working on the docs-download project.
+Coding guidelines for agentic coding assistants working on the docs-download project.
 
 ## Project Overview
 
-docs-download is a Python CLI tool that scrapes and downloads documentation from Mintlify, GitBook, and MkDocs sites to local Markdown files. It uses asyncio for concurrent downloads and preserves directory structure.
+A Python CLI tool that scrapes documentation from Mintlify, GitBook, MkDocs, and ReadMe sites to local Markdown files. Uses asyncio for concurrent downloads.
 
 ## Build/Lint/Test Commands
 
@@ -26,42 +26,32 @@ uv sync
 
 ```bash
 # Check for linting issues
-make lint
-# or
-uv run ruff check .
+make lint                   # or: uv run ruff check .
 
 # Auto-fix linting issues
-make lint-fix
-# or
-uv run ruff check --fix .
+make lint-fix               # or: uv run ruff check --fix .
 
 # Format code
-make format
-# or
-uv run ruff format .
+make format                 # or: uv run ruff format .
 
 # Run comprehensive checks
-make check
-# or
-uv run ruff check . && uv run ruff format --check .
+make check                  # or: uv run ruff check . && uv run ruff format --check .
 ```
 
 ### Testing
 
 ```bash
 # Run all tests
-make test
-# or
 uv run python -m pytest tests/ -v
 
-# Run specific test file
+# Run a single test file
 uv run python -m pytest tests/test_scraper.py -v
 
-# Run specific test function
-uv run python -m pytest tests/test_scraper.py::TestMintlifyScraper::test_download_file -v
+# Run a specific test function
+uv run python -m pytest tests/test_scraper.py::test_function_name -v
 
-# Run tests with coverage
-uv run python -m pytest tests/ --cov=src/ --cov-report=html
+# Run tests matching a pattern
+uv run python -m pytest tests/ -v -k "test_name_pattern"
 ```
 
 ### Running the Application
@@ -71,6 +61,7 @@ uv run python -m pytest tests/ --cov=src/ --cov-report=html
 uv run mintlify-download --help
 uv run gitbook-download --help
 uv run mkdocs-download --help
+uv run readme-download --help
 
 # Example runs
 uv run mintlify-download https://docs.example.com/ --output ./docs --verbose
@@ -79,31 +70,49 @@ uv run gitbook-download https://docs.example.com/ --concurrency 5 --skip-existin
 
 ## Code Style Guidelines
 
-### Python Version & Dependencies
+### Python Configuration
 
 - **Python**: 3.10+ required
-- **Package Manager**: uv (preferred) or pip
-- **Dependencies**: httpx[socks], beautifulsoup4, rich, click
-- **Dev Dependencies**: ruff, pytest, mypy (planned)
+- **Package Manager**: uv (preferred)
+- **Line Length**: 100 characters
+- **Quote Style**: Double quotes for strings
+- **Indent**: 4 spaces
 
 ### Import Organization
 
-- Standard library imports first (alphabetized)
-- Third-party imports second (alphabetized)
-- Local imports third (alphabetized)
+Group imports with blank lines between:
+
+1. Standard library (alphabetized)
+2. Third-party packages (alphabetized)
+3. Local imports (alphabetized)
+
+```python
+import asyncio
+import os
+from dataclasses import dataclass
+from urllib.parse import urljoin, urlparse
+
+import click
+import httpx
+from bs4 import BeautifulSoup
+from rich.console import Console
+
+from mintlify_download.scraper import MintlifyScraper, ScraperConfig
+```
 
 ### Naming Conventions
 
-- **Classes**: PascalCase (e.g., `MintlifyScraper`)
-- **Functions/Methods**: snake_case (e.g., `download_file`)
-- **Variables**: snake_case (e.g., `base_url`)
-- **Private methods**: Leading underscore (e.g., `_normalize_url`)
+- **Classes**: PascalCase (`MintlifyScraper`, `ScraperConfig`)
+- **Functions/Methods**: snake_case (`download_file`)
+- **Variables**: snake_case (`base_url`)
+- **Private methods**: Leading underscore (`_normalize_url`)
+- **Constants**: UPPER_SNAKE_CASE (`DEFAULT_TIMEOUT`)
 
 ### Type Hints
 
 - Use type hints for all function parameters and return values
 - Use `dataclasses` for configuration and data structures
-- Include type hints for complex data structures and async functions
+- Use `|` union syntax (Python 3.10+) instead of `Optional` or `Union`
 
 ```python
 @dataclass
@@ -112,61 +121,63 @@ class ScraperConfig:
     output_dir: str = "./downloaded_docs"
     concurrency: int = 10
     timeout: float = 30.0
+
+async def _download(self, url: str) -> tuple[bytes, str] | None:
+    ...
 ```
 
 ### Error Handling
 
-- Use try/except blocks for expected errors
-- Handle `KeyboardInterrupt` specially for graceful shutdown
-- Use Rich console for user-facing error messages with colors
-- Re-raise exceptions with `from` for proper traceback
+```python
+try:
+    result = await self._download(url)
+except httpx.HTTPError as e:
+    console.print(f"[red]HTTP error: {e}[/red]")
+    raise ScrapingError(f"Failed to download {url}") from e
+```
 
 ### Async/Await Patterns
 
-- Use asyncio for all I/O operations
-- Use asyncio.Semaphore for concurrency control
-- Use asyncio.Queue for work distribution
-
 ```python
-async def _download_with_semaphore(self, client: httpx.AsyncClient, url: str) -> bytes:
-    async with self.semaphore:
-        async with client.get(url, timeout=self.config.timeout) as response:
-            response.raise_for_status()
-            return await response.aread()
+async def _worker(self, client: httpx.AsyncClient) -> None:
+    while True:
+        try:
+            url = await asyncio.wait_for(self.urls_to_visit.get(), timeout=5.0)
+        except asyncio.TimeoutError:
+            break
+        async with self.semaphore:
+            await self._process_url(client, url)
 ```
 
 ### Docstrings
 
-- Use triple-quoted docstrings for all public functions, classes, and modules
-- Follow Google-style docstring format
-- Include parameter descriptions, return types, and examples
+Use triple-quoted docstrings for all public functions, classes, and modules. Keep docstrings concise but descriptive.
 
 ### CLI Interface
 
-- Use Click for command-line interfaces
+- Use Click for CLI
 - Provide sensible defaults for all options
-- Include comprehensive help text for all options
-- Use Rich for console output and progress bars
+- Include help text for all options
+- Use Rich for console output
+- Handle `KeyboardInterrupt` for graceful shutdown
 
 ### File Structure
 
-- Organize code into packages: `mintlify_download`, `gitbook_download`, `mkdocs_download`
-- Each package should have: `__init__.py`, `cli.py`, `scraper.py`, `py.typed`
+- Packages: `mintlify_download`, `gitbook_download`, `mkdocs_download`, `readme_download`
+- Each package: `__init__.py`, `cli.py`, `scraper.py`, `py.typed`
 - Use relative imports within packages
-- Keep CLI entry points separate from core logic
 
-### Security Considerations
+### Linting Rules (Ruff)
 
-- Validate URLs to prevent directory traversal attacks
-- Sanitize file paths and normalize them
-- Use appropriate timeouts to prevent hanging
+Enabled: E, W, F, I, B, C4, UP
+Ignored: E501 (line length), B008 (function calls in defaults), C901 (complexity)
 
 ## Development Workflow
 
-1. **Before coding**: Run `make check` to ensure clean starting point
-2. **During development**: Use `make lint-fix` and `make format` frequently
-3. **Before commit**: Run `make check` and ensure all tests pass
-4. **Testing**: Add comprehensive tests for new functionality
+1. **Before coding**: Run `make check` for clean starting point
+2. **During development**: Run `make lint-fix && make format` frequently
+3. **Before commit**: Run `make check` to verify code quality
+4. **Add tests**: Include tests for new functionality
 
 ## Architecture Patterns
 
@@ -174,21 +185,21 @@ async def _download_with_semaphore(self, client: httpx.AsyncClient, url: str) ->
 
 - Separate configuration from implementation using dataclasses
 - Use composition over inheritance
-- Keep scrapers focused on single responsibility (Mintlify vs GitBook vs MkDocs)
-
-### Async Patterns
-
-- Use asyncio.Queue for work distribution
-- Use asyncio.Semaphore for rate limiting
-- Use asyncio.gather for concurrent operations
+- Keep scrapers focused on single responsibility
 
 ### Data Flow
 
 1. Parse and validate configuration
-2. Discover URLs from starting point (mint.json, HTML parsing)
+2. Discover URLs (mint.json, HTML parsing)
 3. Filter and deduplicate URLs
-4. Download content concurrently with proper error handling
+4. Download content concurrently
 5. Process images and update references
-6. Validate and save files with correct extensions
-7. Report comprehensive statistics</content>
-<parameter name="filePath">AGENTS.md
+6. Validate and save files
+7. Report statistics
+
+### Security
+
+- Validate URLs to prevent directory traversal
+- Sanitize and normalize file paths
+- Use appropriate timeouts
+- Never log sensitive data

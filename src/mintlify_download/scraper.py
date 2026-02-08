@@ -6,6 +6,7 @@ import os
 import re
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
+from xml.etree import ElementTree
 
 import httpx
 from bs4 import BeautifulSoup
@@ -246,8 +247,39 @@ class MintlifyScraper:
 
         return urls
 
+    async def _fetch_sitemap_urls(self, client: httpx.AsyncClient) -> list[str]:
+        """Fetch all page URLs from sitemap.xml."""
+        urls = []
+
+        # Try root sitemap
+        parsed_base = urlparse(self.base_url)
+        sitemap_url = f"{parsed_base.scheme}://{parsed_base.netloc}/sitemap.xml"
+
+        try:
+            response = await client.get(sitemap_url, timeout=self.config.timeout)
+            if response.status_code != 200:
+                return urls
+
+            # Simple XML parsing
+            root = ElementTree.fromstring(response.content)
+
+            # Find all loc elements
+            for elem in root.iter():
+                if elem.tag.endswith("loc"):
+                    if elem.text:
+                        urls.append(elem.text)
+
+            if self.config.verbose and urls:
+                console.print(f"[green]Found {len(urls)} URLs in sitemap[/green]")
+
+        except Exception as e:
+            if self.config.verbose:
+                console.print(f"[dim]Could not fetch sitemap {sitemap_url}: {e}[/dim]")
+
+        return urls
+
     async def _extract_links_from_html(self, client: httpx.AsyncClient, url: str) -> list[str]:
-        """Extract internal links from HTML page."""
+        """Extract internal links from HTML page or Markdown content."""
         links = []
 
         try:
@@ -255,10 +287,26 @@ class MintlifyScraper:
             if response.status_code != 200:
                 return links
 
-            soup = BeautifulSoup(response.text, "html.parser")
+            raw_links = []
 
-            for a_tag in soup.find_all("a", href=True):
-                href = a_tag["href"]
+            # Check for Markdown content
+            content_type = response.headers.get("content-type", "").lower()
+            if "text/markdown" in content_type or "text/x-markdown" in content_type:
+                # Extract links from Markdown
+                text = response.text
+                # [Label](url)
+                raw_links.extend(re.findall(r"\]\(([^)]+)\)", text))
+                # href="url" (in components)
+                raw_links.extend(re.findall(r'href=["\']([^"\']+)["\']', text))
+            else:
+                soup = BeautifulSoup(response.text, "html.parser")
+                for a_tag in soup.find_all("a", href=True):
+                    raw_links.append(a_tag["href"])
+
+            for href in raw_links:
+                href = str(href).strip()
+                if not href:
+                    continue
 
                 # Skip external links, anchors, and javascript
                 if href.startswith(("http://", "https://")) and self.base_host not in href:
@@ -267,7 +315,11 @@ class MintlifyScraper:
                     continue
 
                 # Convert to absolute URL
-                absolute_url = urljoin(url, href)
+                if not href.startswith(("http://", "https://")):
+                    absolute_url = urljoin(url, href)
+                else:
+                    absolute_url = href
+
                 normalized = self._normalize_url(absolute_url)
 
                 if self._is_valid_doc_url(normalized):
@@ -277,7 +329,7 @@ class MintlifyScraper:
             if self.config.verbose:
                 console.print(f"[yellow]Failed to extract links from {url}: {e}[/yellow]")
 
-        return links
+        return list(set(links))
 
     async def _extract_images_from_content(
         self, client: httpx.AsyncClient, content: bytes, page_url: str
@@ -342,8 +394,9 @@ class MintlifyScraper:
         """Try to download .mdx or .md source for a URL."""
         url_str = url.rstrip("/")
 
-        # Try both extensions
+        # Try raw URL (some sites serve MDX directly), then extensions
         candidates = [
+            (url_str, ".mdx"),
             (f"{url_str}.mdx", ".mdx"),
             (f"{url_str}.md", ".md"),
         ]
@@ -473,6 +526,23 @@ class MintlifyScraper:
                         self.visited_urls.add(normalized)
                         await self.urls_to_visit.put(normalized)
                         self.stats.discovered += 1
+            else:
+                # Try sitemap
+                sitemap_urls = await self._fetch_sitemap_urls(client)
+                for sitemap_url in sitemap_urls:
+                    # Handle host mismatch (e.g. docs.risescan.io vs docs.risechain.com)
+                    parsed_sitemap = urlparse(sitemap_url)
+                    
+                    # Check if path is relevant
+                    if parsed_sitemap.path.startswith(self.base_path):
+                        # Construct URL with our base host
+                        full_url = f"https://{self.base_host}{parsed_sitemap.path}"
+                        
+                        normalized = self._normalize_url(full_url)
+                        if normalized not in self.visited_urls and self._is_valid_doc_url(normalized):
+                            self.visited_urls.add(normalized)
+                            await self.urls_to_visit.put(normalized)
+                            self.stats.discovered += 1
 
             # Always add the base URL to start crawling
             self.visited_urls.add(self.base_url)
