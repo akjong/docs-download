@@ -14,6 +14,7 @@ dependencies = [
     "click>=8.1.0",
     "markdown>=3.10.2",
     "html2text>=2025.4.15",
+    "playwright>=1.40.0",
 ]
 
 [project.scripts]
@@ -21,6 +22,7 @@ mintlify-download = "mintlify_download.cli:main"
 gitbook-download = "gitbook_download.cli:main"
 mkdocs-download = "mkdocs_download.cli:main"
 readme-download = "readme_download.cli:main"
+stoplight-download = "stoplight_download.cli:main"
 
 [dependency-groups]
 dev = [

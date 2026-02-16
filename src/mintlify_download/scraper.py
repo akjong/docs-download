@@ -532,14 +532,16 @@ class MintlifyScraper:
                 for sitemap_url in sitemap_urls:
                     # Handle host mismatch (e.g. docs.risescan.io vs docs.risechain.com)
                     parsed_sitemap = urlparse(sitemap_url)
-                    
+
                     # Check if path is relevant
                     if parsed_sitemap.path.startswith(self.base_path):
                         # Construct URL with our base host
                         full_url = f"https://{self.base_host}{parsed_sitemap.path}"
-                        
+
                         normalized = self._normalize_url(full_url)
-                        if normalized not in self.visited_urls and self._is_valid_doc_url(normalized):
+                        if normalized not in self.visited_urls and self._is_valid_doc_url(
+                            normalized
+                        ):
                             self.visited_urls.add(normalized)
                             await self.urls_to_visit.put(normalized)
                             self.stats.discovered += 1
