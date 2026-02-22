@@ -24,6 +24,7 @@ mkdocs-download = "mkdocs_download.cli:main"
 readme-download = "readme_download.cli:main"
 stoplight-download = "stoplight_download.cli:main"
 docusaurus-download = "docusaurus_download.cli:main"
+webshare-download = "webshare_download.cli:main"
 
 [dependency-groups]
 dev = [
