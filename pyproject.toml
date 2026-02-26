@@ -26,6 +26,7 @@ stoplight-download = "stoplight_download.cli:main"
 docusaurus-download = "docusaurus_download.cli:main"
 webshare-download = "webshare_download.cli:main"
 arc-blog-download = "arc_blog_download.cli:main"
+circle-openapi-download = "circle_openapi_download.cli:main"
 
 [dependency-groups]
 dev = [
