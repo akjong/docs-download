@@ -6,15 +6,16 @@ readme = "README.md"
 authors = [
     { name = "Bob Liu", email = "akagi201@gmail.com" }
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "httpx[socks]>=0.28.1",
-    "beautifulsoup4>=4.12.0",
-    "rich>=13.0.0",
-    "click>=8.1.0",
+    "beautifulsoup4>=4.14.3",
+    "rich>=15.0.0",
+    "click>=8.4.1",
     "markdown>=3.10.2",
     "html2text>=2025.4.15",
-    "playwright>=1.40.0",
+    "markdownify>=0.14.1",
+    "playwright>=1.60.0",
 ]
 
 [project.scripts]
@@ -27,10 +28,11 @@ docusaurus-download = "docusaurus_download.cli:main"
 webshare-download = "webshare_download.cli:main"
 arc-blog-download = "arc_blog_download.cli:main"
 circle-openapi-download = "circle_openapi_download.cli:main"
+coinw-download = "coinw_download.cli:main"
 
 [dependency-groups]
 dev = [
-    "ruff>=0.1.0",
+    "ruff>=0.15.14",
 ]
 
 [build-system]
@@ -62,7 +64,7 @@ ignore = [
 "test_*.py" = ["B011"] # assert false
 
 [tool.ruff.lint.isort]
-known-first-party = ["mintlify_download"]
+known-first-party = ["mintlify_download", "coinw_download"]
 
 [tool.ruff.format]
 quote-style = "double"
