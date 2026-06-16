@@ -29,10 +29,11 @@ webshare-download = "webshare_download.cli:main"
 arc-blog-download = "arc_blog_download.cli:main"
 circle-openapi-download = "circle_openapi_download.cli:main"
 coinw-download = "coinw_download.cli:main"
+htx-download = "htx_download.cli:main"
 
 [dependency-groups]
 dev = [
-    "ruff>=0.15.14",
+    "ruff>=0.15.17",
 ]
 
 [build-system]

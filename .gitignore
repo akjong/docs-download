@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+.playwright-mcp/
+.ruff_cache/
+.rumdl_cache/
