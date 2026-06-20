@@ -9,7 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "httpx[socks]>=0.28.1",
-    "beautifulsoup4>=4.14.3",
+    "beautifulsoup4>=4.15.0",
     "rich>=15.0.0",
     "click>=8.4.1",
     "markdown>=3.10.2",
@@ -33,7 +33,7 @@ htx-download = "htx_download.cli:main"
 
 [dependency-groups]
 dev = [
-    "ruff>=0.15.17",
+    "ruff>=0.15.18",
 ]
 
 [build-system]
