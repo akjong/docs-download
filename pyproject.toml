@@ -30,6 +30,7 @@ arc-blog-download = "arc_blog_download.cli:main"
 circle-openapi-download = "circle_openapi_download.cli:main"
 coinw-download = "coinw_download.cli:main"
 htx-download = "htx_download.cli:main"
+bitget-download = "bitget_download.cli:main"
 
 [dependency-groups]
 dev = [
