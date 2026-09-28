@@ -1,0 +1,221 @@
+
+# Custom Layer | Hook
+ 
+Hooks allow developers to add customization to a pool by having callbacks in the various stage of the lifecycle. There are 10 possible callbacks before / after 5 key actions which happen in an AMM. The key actions include pool initialization, swap, addLiquidity, removeLiquidity and Donate
+ 
+> **Note:** The image below shows the list of callbacks for concentrated liquidity pool. Liquidity book pool has similar callback with slightly different name. See bin hook here: [https://github.com/pancakeswap/infinity-core/blob/main/src/pool-bin/interfaces/IBinHooks.sol](https://github.com/pancakeswap/infinity-core/blob/main/src/pool-bin/interfaces/IBinHooks.sol)
+ 
+
+![Type of callbacks](https://developer.pancakeswap.finance/infinity/custom-layer-hook-1.png)
+
+ 
+## Initialize a pool with hook
+ 
+In order to initialize a pool with the hook, there are a few pointers to note:
+ 
+1. Have the hook contract deployed (no address mining is required) and the callback required defined in `getHooksRegistrationBitmap` method 
+ 
+```
+/// @dev Below indicate `beforeSwap` callback required
+function getHooksRegistrationBitmap() external pure override returns (uint16) {
+  return _hooksRegistrationBitmapFrom(
+    Permissions({
+      beforeInitialize: false,
+      afterInitialize: false,
+      beforeAddLiquidity: true,
+      afterAddLiquidity: true,
+      beforeRemoveLiquidity: false,
+      afterRemoveLiquidity: false,
+      beforeSwap: true, // beforeSwap enabled
+      afterSwap: true,
+      beforeDonate: false,
+      afterDonate: false,
+ 
+      // Hook return delta (documented below)
+      beforeSwapReturnsDelta: false,
+      afterSwapReturnsDelta: false,
+      afterAddLiquidityReturnsDelta: false,
+      afterRemoveLiquidityReturnsDelta: false
+    })
+  );
+}
+```
+ 
+1. When initializing the pool, specify the hook contract in the pool key and remember to call `hook.getHooksRegistrationBitmap()` in parameters so the callback are saved in `PoolKey` . 
+ 
+```
+key = PoolKey({
+  currency0: currency0,
+  currency1: currency1,
+  hooks: hook, // hook contract address 
+  poolManager: poolManager,
+  fee: uint24(3000), // 0.3% swap fee 
+  // parameters include hook callback and tickSpacing: 10
+  parameters: bytes32(uint256(hook.getHooksRegistrationBitmap())).setTickSpacing(10)
+});
+ 
+/// Initialize the pool 
+poolManager.initialize(key, Constants.SQRT_RATIO_1_1, new bytes(0));
+```
+ 
+## Hook return delta
+ 
+Hook return delta allows hook to modify the balanceDelta to take a fee or give token for the operation.
+ 
+It can be done in 4 places: before/after swap and after add/remove liquidity. And in order for hook to modify the delta, Hook need to set the permission during hook initialization.
+ 
+```
+// Hooks need to implement getHooksRegistrationBitmap() to define their permission:
+function getHooksRegistrationBitmap() external pure override returns (uint16) {
+  return _hooksRegistrationBitmapFrom(
+    Permissions({
+ 
+      // The 4 permissions around modifying return delta
+      beforeSwapReturnsDelta: false, // during beforeSwap 
+      afterSwapReturnsDelta: false, // during afterSwap 
+      afterAddLiquidityReturnsDelta: false, // during afterAddLiquidity 
+      afterRemoveLiquidityReturnsDelta: false // during afterRemoveLiquidity
+    })
+  );
+}
+```
+ 
+### 1. before swap
+ 
+When PoolManager call Hooks.beforeSwap, it expects 3 return values:
+ 
+```
+// 1. bytes4: function selector to indicate the hook execution is successful
+// 2. BeforeSwapDelta: hook delta for both specified and unspecified currency
+// 3. uint24: lpFeeOverride (for dynamic fee override, we'll talk about this in another section)
+function beforeSwap(...) external returns (bytes4, BeforeSwapDelta, uint24);
+```
+ 
+`BeforeSwapDelta` is a `int256` value with the upper 128 bits representing delta in specified token and lower 128 bits representing delta in unspecified token. Specified token refers to the token that the user specified.
+ 
+Example table:
+ Description SpecifiedToken UnspecifiedToken swap exactIn token0 for token1 token0 token1 swap exactIn token1 for token0 token1 token0 swap token0 for exactOut token1 token1 token0 swap token1 for exactOut token0 token0 token1 **Scenario 1: When BeforeSwapDelta modify specifiedToken** 
+Take example in `swap exactIn token0 for token1` :
+ 
+1. returning a positive specifiedToken means the hook will take some token0 as fee so the swapper get lesser token1 eventually. 
+2. returning a negative specifiedToken means the hook will provide extra token0 so the swapper get extra token1 eventually. 
+ **Scenario 2: When BeforeSwapDelta modify unspecifiedToken** 
+Take example in `swap exactIn token0 for token1` :
+ 
+1. returning a positive unspecifiedToken means the hook will take some token1 as fee so the swapper get lesser token1 eventually. 
+2. returning a negative unspecifiedToken means the hook will provide extra token1 so the swapper get extra token1 eventually. 
+ 
+### 2. after swap
+ 
+When PoolManager call Hooks.afterSwap, it expects 2 return value:
+ 
+```
+// 1. bytes4: function selector to indicate the hook execution is successful
+// 2. int128: hook delta in unspecified currency
+function afterSwap(...) external returns (bytes4, int128)
+```
+ 
+If hook returns a positive value, it means hook take a fee on the unspecifiedToken and if hook return a negative value, it means hook will give token to the swapper.
+ Description UnspecifiedToken swap exactIn token0 for token1 token1 swap exactIn token1 for token0 token0 swap token0 for exactOut token1 token0 swap token1 for exactOut token0 token1 
+For example `swap exactIn token0 for token1` :
+ 
+1. Returning a `positive int128` mean the hook will take some token1 as fee and swapper will get lesser token1. 
+2. Returning a `negative int128` mean the hook will provide extra token1 as output and swapper will get more token1. 
+ 
+At this point, you might see there's some overlap in beforeSwap and afterSwap. Both allows modifying the delta of unspecifiedToken. However in cases such as exactIn, the number of token out is unknown yet in `beforeSwap` . Thus, if you want to take 5% tokenOut as fee, you can only do that in afterSwap when the number of tokenOut is known.
+ 
+### 3. after adding liquidity
+ 
+When PoolManager call Hooks.afterAddLiquidity (afterMint for BinHook), it expects 2 return value:
+ 
+```
+// 1. bytes4: function selector to indicate the hook execution is successful
+// 2. BalanceDelta: hook delta in both specified/unspecified currency
+function afterAddLiquidity(...) external returns (bytes4, BalanceDelta)
+```
+ 
+`BalanceDelta` is a `int256` value where the upper 128 bit represent token0 and the lower 128 bit represent token1.
+ 
+1. Returning positive BalanceDelta will indicate the hook will take some token0 or token1. 
+2. Returning negative BalanceDelta will indicate the hook will give some token0 or token1. 
+ 
+### 4. after removing liquidity
+ 
+When PoolManager call Hooks.afterRemoveLiquidity (afterBurn for BinHook), it expects 2 return value:
+ 
+```
+// 1. bytes4: function selector to indicate the hook execution is successful
+// 2. BalanceDelta: hook delta in both specified/unspecified currency
+function afterRemoveLiquidity(...) external returns (bytes4, BalanceDelta)
+```
+ 
+1. Returning positive BalanceDelta will indicate the hook will take some token0 or token1. 
+2. Returning negative BalanceDelta will indicate the hook will give some token0 or token1. 
+ 
+## Dynamic lp (swap) fee
+ 
+A pool can be initialized with either fixed fee or dynamic fee in `poolKey.fee` .
+ 
+To enable dynamic fees, the dynamic fee flag must be set in the fee.
+ 
+```
+key = PoolKey({
+  currency0: currency0,
+  currency1: currency1,
+  hooks: hook, 
+  poolManager: poolManager,
+  fee: LPFeeLibrary.DYNAMIC_FEE_FLAG, 
+  parameters: bytes32(uint256(hook.getHooksRegistrationBitmap())).setTickSpacing(10)
+});
+```
+ 
+A hook with beforeSwap() permission should be attached to the pool, as the dynamic LP fee for each swap comes from the third return value of beforeSwap(). If the dynamic fee flag is set but no hook with beforeSwap() is attached, the LP fee will be 0% for all swaps.
+ **Example** 
+In the example below, the hook returns 3000 (0.3%) as dynamic fee in beforeSwap() callback.
+ 
+```
+// Pool will call hook.beforeSwap() before a swap:
+ 
+// With the hook.beforeSwap() implementation: 
+function beforeSwap(..) external returns (bytes4 selector, BeforeSwapDelta delta, uint24 lpFeeOverRide) {
+  // Set 0.3% for this swap. In your hook, you can add custom logic here.
+  uint24 lpFee = 3000;
+ 
+  return (
+    this.beforeSwap.selector, 
+    BeforeSwapDeltaLibrary.ZERO_DELTA, 
+    lpFee | LPFeeLibrary.OVERRIDE_FEE_FLAG);
+}
+```
+ 
+## FAQ(s)
+ 
+---
+ **Q1: Can the hook contract be at any address?** 
+Hook can be deployed on any address. The callback permission required are defined in `poolkey.parameters` and are immutable. Any changes to callback permission will require a new pool.
+ 
+---
+ **Q2: Can you explain more aboutpoolKey.parameters?** 
+`poolKey.parameters` is a bytes32 parameters which includes hook callback required and the format is as follows:
+ 
+```
+// first 16 bits for hooks callback 
+[0 - 15]: reserve for hooks callback
+ 
+// other bits can be used by each pool type. eg.
+[16 - 39] concentrated liquidity pool tick spacing 
+[16 - 31] bin pool bin step  
+[16 - xx] other new pool type config
+```
+ 
+For example in `ICLHooks.sol` , if bit 0 has the value of 1, beforeInitialize callback is required.
+ 
+```
+uint8 constant HOOKS_BEFORE_INITIALIZE_OFFSET = 0;
+```
+ 
+However, all of this are made easier for you! eg. To define callback required in parameters simply overwrite `getHooksRegistrationBitmap` in your hooks and call `hooks.getHooksRegistrationBitmap` shown above
+ 
+## List of hooks
+ 
+Visit [https://github.com/pancakeswap/infinity-hooks](https://github.com/pancakeswap/infinity-hooks) for more hooks example

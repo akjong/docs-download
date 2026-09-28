@@ -1,0 +1,114 @@
+
+# Accounting Layer | Vault
+ 
+At the core of this architecture is the [Vault](https://github.com/pancakeswap/infinity-core/blob/main/src/Vault.sol) , which functions as an immutable accounting layer. It maintains a ledger of tokens that are either deposited or owed, facilitating a secure and efficient settlement process at the end of each transaction.
+ 
+## Lock Mechanism
+ 
+One of the key mechanism in the vault is the **lock mechanism** . Caller need to get a lock from the vault before performing any operation (swap, liquidity or donate) with the pool manager.
+ 
+
+![Vault](https://developer.pancakeswap.finance/infinity/vault.png)
+
+ 
+The high level steps are as follow:
+ 
+1. Acquire a lock from the vault via `vault.lock()` and the vault will perform a callback to the caller `lockAcquired(data)` 
+2. Within `lockAcquired(data)` , caller perform action such as swap `clPoolManager.swap(...)` or liquidity `clPoolManager.modifyLiquidity(..)` 
+3. The poolManager will inform vault of the balance changes through `vault.accountAppBalanceDelta(...)` 
+4. Caller will then need to reconcile the balance with the vault through either of the 4 methods: `take(), settle(), mint() or burn()` . 
+ 
+```
+// An example of the 4 steps process, some codes are removed to keep this simple
+contract ExamplePositionManager {
+    function addLiquidity(AddLiquidity calldata params) external {
+        // Step 1: Get a lock
+        vault.lock(..)
+    }
+ 
+    function lockAcquired(bytes calldata rawData) external {
+        // Step 2: Perform action with pool manager
+        CallbackData memory data = abi.decode(rawData, (CallbackData));
+        (BalanceDelta delta, ) = poolManager.mint(...)
+ 
+        // Step 4: Reconcile balance, an example of token0 below
+        if (delta.amount0() > 0) {
+            vault.take(poolKey.currency0, user, uint128(delta.amount0()));
+        } else {
+            // sync -> transfer token0 to the vault -> then call vault.settle
+            vault.sync(poolKey.currency0);
+            pay(poolKey.currency0, user, address(vault), uint256(int256(-delta.amount0())));
+            vault.settle();
+        }
+    }
+}
+```
+ 
+## Flash accounting
+ 
+The vault uses [SettlementGuard](https://github.com/pancakeswap/infinity-core/blob/main/src/libraries/SettlementGuard.sol) to keep track of the number of unsettled currency and how much is owed/owe for each currency.
+ 
+Below shows a snippet of code in `SettlementGuard.sol` . Whenever an operation happen, pool manager will call Vault.accountDelta to inform vault of the balance change
+ 
+```
+function accountDelta(address settler, Currency currency, int256 newlyAddedDelta) internal {
+    if (newlyAddedDelta == 0) return;
+ 
+    /// @dev update the count of non-zero deltas if necessary
+    int256 currentDelta = getCurrencyDelta(settler, currency);
+    int256 nextDelta = currentDelta + newlyAddedDelta;
+    unchecked {
+        if (nextDelta == 0) {
+            tstore(UNSETTLED_DELTAS_COUNT, sub(tload(UNSETTLED_DELTAS_COUNT), 1))
+        } else if (currentDelta == 0) {
+            tstore(UNSETTLED_DELTAS_COUNT, add(tload(UNSETTLED_DELTAS_COUNT), 1))
+        }
+    }
+ 
+    uint256 elementSlot = uint256(keccak256(abi.encode(settler, currency, CURRENCY_DELTA)));
+    tstore(elementSlot, nextDelta)
+}
+```
+ 
+This technique is also known as **flash accounting** as ledger (currency owed/owe to vault) is tracked temporarily through transient storage and user only settle them at the end of all operations. An example where gas benefit shines is multi-hop transactions,
+ 
+1. User swap A -> B -> C 
+2. In PCS v3, there will be ERC20 transfer of all three token A, B and C 
+3. In PCS Infinity, as token B is netted off in the ledger by the end of the multi-hop operation, there will only be ERC20 transfer of token A and C. 
+ 
+## Reconciling balance
+ 
+BalanceDelta is returned whenever you perform some actions with [poolManager](https://github.com/pancakeswap/infinity-core/blob/main/src/pool-cl/CLPoolManager.sol) , eg. `swap | modifyLiquidity | donate` . It contains `int128 amount0` and `int128 amount1` that we need to take or settle with the vault.
+ 
+### Positive balance delta
+ 
+In this case, vault owes the caller the amount of token.
+ 
+Caller have 3 choices:
+ 
+1. `vault.take(Currency currency, address to, uint256 amount)` - this will transfer the owed token from vault to the address (specified in `address to` ). 
+2. `vault.mint(address to, Currency currency, uint256 amount)` 
+3. `vault.clear(Currency currency, uint256 amount)` - this will clear out the balance delta, no token will be transferred to caller. WARNING: only use this if the amount is too low where the gas cost outweigh the erc20 value 
+ 
+### Negative balance delta
+ 
+In this case, caller owes the vault the amount of token.
+ 
+Caller have 2 choices:
+ 
+1. Call `vault.sync(currency)` , transfer token to the vault and call `vault.settle()` (settles whichever currency was last passed to `sync` ; no currency argument) 
+2. Assuming caller have done `vault.mint` earlier to store surplus token on the vault, `vault.burn(address from, Currency currency, uint256 amount)` 
+ 
+##### Q1. Why are there 3 steps vault.sync(currency), transfer() token to vault and vault.settle() for settlement?
+ 
+1. `vault.sync()` inform vault to store the vault's current currency balance in transient storage. 
+2. After which token transfer to the vault 
+3. `vault.settle()` inform vault to compare the balance of token in vault now and (1) to know how many token are sent to the vault. 
+ 
+You may refer to this [CurrencySettlement.sol](https://github.com/pancakeswap/infinity-core/blob/main/test/helpers/CurrencySettlement.sol) library as a reference implementation on the 3 step settlement.
+ 
+##### Q2. When to usetake/mint/settle/burn?
+ 
+It really depends on your use case, for most use case, `take/settle` is sufficient.
+ 
+However if your developing a contract which does a lot of trades eg. arbitrage bot, you can consider `mint/burn` to save on the gas cost by reducing the number of ERC-20 token transfer.

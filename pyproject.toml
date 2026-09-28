@@ -31,6 +31,7 @@ circle-openapi-download = "circle_openapi_download.cli:main"
 coinw-download = "coinw_download.cli:main"
 htx-download = "htx_download.cli:main"
 bitget-download = "bitget_download.cli:main"
+pancakeswap-download = "pancakeswap_download.cli:main"
 
 [dependency-groups]
 dev = [
@@ -66,7 +67,7 @@ ignore = [
 "test_*.py" = ["B011"] # assert false
 
 [tool.ruff.lint.isort]
-known-first-party = ["mintlify_download", "coinw_download"]
+known-first-party = ["mintlify_download", "coinw_download", "pancakeswap_download"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -1,0 +1,66 @@
+
+# AMM Layer | PoolManager
+ 
+Pool Managers are singleton contract that encapsulates the logic for different types of AMMs. In the initial deployment, there will be 2 AMM types, visit their respective page to learn more about them.
+ 
+1. [CLPoolManager](https://developer.pancakeswap.finance/contracts/infinity/overview/amm-layer/concentrated-liquidity) 
+2. [BinPoolManager](https://developer.pancakeswap.finance/contracts/infinity/overview/amm-layer/liquidity-book) 
+ 
+### Singleton
+ 
+In PancakeSwap v3, each pool is a separate contract. In PancakeSwap Infinity, all pools will be encapsulated in a single PoolManager contract. For example, all concentrated liquidity pools in [CLPoolManager](https://github.com/pancakeswap/infinity-core/blob/main/src/pool-cl/CLPoolManager.sol) and all liquidity book pools in [BinPoolManager](https://github.com/pancakeswap/infinity-core/blob/main/src/pool-bin/BinPoolManager.sol)
+ 
+### PoolKey | PoolId
+ 
+[PoolKey](https://github.com/pancakeswap/infinity-core/blob/main/src/types/PoolKey.sol) is a struct which describe each pool.
+ 
+```
+/// @notice Returns the key for identifying a pool
+struct PoolKey {
+    /// @notice The lower currency of the pool, sorted numerically
+    Currency currency0;
+    /// @notice The higher currency of the pool, sorted numerically
+    Currency currency1;
+    /// @notice The hooks of the pool, won't have a general interface because hooks interface vary on pool type
+    IHooks hooks;
+    /// @notice The pool manager of the pool
+    IPoolManager poolManager;
+    /// @notice The pool swap fee, capped at 1_000_000. The upper 4 bits determine if the hook sets any fees.
+    uint24 fee;
+    /// @notice Hooks callback and pool specific parameters, i.e. tickSpacing for CL, binStep for bin
+    bytes32 parameters;
+}
+```
+ 
+[PoolId](https://github.com/pancakeswap/infinity-core/blob/main/src/types/PoolId.sol) is a bytes32 of `keccak256(abi.encode(poolKey))` You will notice some input from PoolManager requiring PoolId. Derive `PoolId` from `PoolKey` via the following:
+ 
+```
+import {PoolIdLibrary} from "@pancakeswap/infinity-core/src/types/PoolId.sol";
+ 
+// Use PoolIdLibrary for PoolKey type
+using PoolIdLibrary for PoolKey;
+ 
+PoolKey memory key = PoolKey({
+  currency0: currency0,
+  currency1: currency1
+  hooks: IHooks(address(0)),
+  poolManager: poolManager,
+  fee: uint24(3000),
+  parameters: bytes32(uint256(counterHook.getHooksRegistrationBitmap())).setTickSpacing(10)
+});
+ 
+// Get PoolId from PoolKey via PoolIdLibrary
+PoolId id = key.toId();
+```
+ 
+### Initializing a Pool
+ 
+Before swap or liquidity operations can be performed on a pool, the first step would be to initialize the pool. To initialize, call either `CLPoolManager` or `BinPoolManager` initialize method.
+ 
+```
+// CLPoolManager
+function initialize(PoolKey memory key, uint160 sqrtPriceX96);
+ 
+// BinPoolManager
+function initialize(PoolKey memory key, uint24 activeId);
+```

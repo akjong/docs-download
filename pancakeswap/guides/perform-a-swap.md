@@ -1,0 +1,473 @@
+
+# Perform a swap
+ 
+We'll utilize Universal Router from [infinity-universal-router](https://github.com/pancakeswap/infinity-universal-router) to handle swaps.
+ 
+> **Note:** This guide will be relocated to the Universal Router section after Infinity is launched as it covers swapping processes for v2, v3, and StableSwap
+ 
+The topic would include:
+ 
+1. Universal Router and Permit2 integration 
+2. Universal Router execution flow 
+3. List of commands 
+4. Example to perform a swap 
+ 
+## 1. Universal Router and Permit2 integration
+ 
+UniversalRouter integrates with [Permit2](https://developer.pancakeswap.finance/contracts/permit2)
+ 
+For the frontend, this means that any operation involving token transfers from the user requires the user to sign a permit message and include that signature in the permit command.
+ 
+Example:
+ 
+```
+bytes memory commands = abi.encodePacked(
+    bytes1(uint8(Commands.PERMIT2_PERMIT)),  // permit2 command 
+    bytes1(uint8(Commands.V2_SWAP_EXACT_IN)));
+ 
+bytes[] memory inputs = new bytes[](2);
+inputs[0] = abi.encode(IAllowanceTransfer.PermitSingle permitSingle, bytes signature); // permit2 input with user's signature
+inputs[1] = abi.encode(...v2 swap input);
+ 
+universalRouter.execute(commands, inputs);
+```
+ 
+For solidity contract calls to Universal Router, make sure to first call `permit2.approve` to authorize the router.
+ 
+```
+// function permit(address owner, PermitSingle memory permitSingle, bytes calldata signature) external;
+ 
+// example infinite approval to universalRouter
+permit2.approve(tokenAddress, address(universalRouter), type(uint160).max, type(uint48).max);
+```
+ 
+## 2. Universal Router execution flow
+ 
+Universal Router expose 2 key functions:
+ 
+```
+// Executes encoded commands along with provided inputs. Reverts if deadline has expired.
+function execute(bytes calldata commands, bytes[] calldata inputs, uint256 deadline);
+ 
+// Executes encoded commands along with provided inputs. 
+function execute(bytes calldata commands, bytes[] calldata inputs);
+```
+ 
+Both functions are similar, with the first function including an additional `deadline` field. The transaction will revert if `block.timestamp > deadline` .
+ 
+### Commands
+ 
+The first parameter `bytes calldata commands` is a list of commands to execute. Each command is encoded in 1 byte, containing the following split of 8 bits:
+ 0 1 2 3 4 5 6 7 flag command 
+- `flag` :
+ 
+- if set as `0` and the command revert, the entire transaction will revert. 
+- if set as `1` and the command revert, the transaction will continue. This allows for partial fills, but be cautious and ensure there are subsequent commands to handle any remaining funds in the Universal Router. 
+- `command` :
+ 
+- a 7 bit unique identifier. A list of commands can be found in [Commands.sol](https://github.com/pancakeswap/infinity-universal-router/blob/main/src/libraries/Commands.sol) and this document. 
+ 
+### Commands inputs
+ 
+The second parameter, `bytes[] calldata input` , is an array of byte strings. Each element in this array contains the ABI-encoded input data corresponding to the specific command being executed.
+ **Example** 
+Given `commands = 0x0a00` , it would mean 2 commands processed in order:
+ 
+1. `0x0a` : `PERMIT2_PERMIT` 
+2. `0x00` : `V3_SWAP_EXACT_IN` 
+ 
+With 2 commands, it would mean `bytes[] calldata input` of length 2.
+ 
+1. `input[0]` : abi-encoded params of `PERMIT2_PERMIT` command 
+2. `input[1]` : abi-encoded params of `V3_SWAP_EXACT_IN` command 
+ 
+## 3. List of commands and input
+ 
+This section document the list of commands and its input. A list of commands can be found in [Commands.sol](https://github.com/pancakeswap/infinity-universal-router/blob/main/src/libraries/Commands.sol) .
+ 
+### V3_SWAP_EXACT_IN
+ 
+Perform a exactIn swap with PCS v3 pool
+ 
+```
+{
+  address recipient; // recipient of output token 
+  uint256 amountIn; // amountIn 
+  uint256 amountOutMin; // revert if amount out is lesser than amountOutMin
+  bytes path; // eg. (token0->token1): bytes memory path = abi.encodePacked(token1(), fee(), token0()); 
+  bool payerIsUser; // if true, transfer token from sender, else take token from contract
+}
+```
+ 
+### V3_SWAP_EXACT_OUT
+ 
+Perform a exactOut swap with PCS v3 pool
+ 
+```
+{
+  address recipient; // recipient of output token 
+  uint256 amountOut; // amountOut 
+  uint256 amountInMax; // revert if amountIn is more than amountInMax
+  bytes path; // eg. (token0->token1): bytes memory path = abi.encodePacked(token1(), fee(), token0()); 
+  bool payerIsUser; // if true, transfer token from sender, else take token from contract
+}
+```
+ 
+### PERMIT2_TRANSFER_FROM
+ 
+Facilitate the transfer of ERC-20 tokens from a user’s wallet to a specified recipient, using the Permit2 smart contract
+ 
+```
+{
+  address token; // token to transfer 
+  address recipient; // recipient
+  uint160 amount; // amount 
+}
+```
+ 
+### PERMIT2_PERMIT_BATCH
+ 
+Allow users to approve multiple token allowances in a single transaction.
+ 
+```
+{
+  IAllowanceTransfer.PermitBatch calldata permitBatch; // see IAllowanceTransfer for struct detail 
+  bytes calldata data; // signature for the permit  
+}
+```
+ 
+### SWEEP
+ 
+Collect or "sweep" tokens from the contract and send them to a specified recipient
+ 
+```
+{
+  address token; // token to sweep 
+  address recipient; // sweep to recipient 
+  uint160 amountMin; // revert if token balance in contract is lesser than amountMin
+}
+```
+ 
+### TRANSFER
+ 
+Transfer a specified amount of tokens (or ETH) from the contract to a designated recipient
+ 
+```
+{
+  address token; // token to transfer 
+  address recipient; // transfer to recipient 
+  uint256 value; // amount of token to transfer 
+}
+```
+ 
+### PAY_PORTION
+ 
+Transfer a portion of its balance of a specified ERC-20 token (or ETH) to a recipient, based on a percentage defined in basis points (where 1 basis point = 0.01%)
+ 
+```
+{
+  address token; // token to transfer 
+  address recipient; // transfer to recipient 
+  uint256 bips; // 10_000 = 100%, 1000 = 10%
+}
+```
+ 
+### V2_SWAP_EXACT_IN
+ 
+Perform a exactIn swap with PCS v2 pool
+ 
+```
+{
+  address recipient; // recipient of output token 
+  uint256 amountIn; // amountIn 
+  uint256 amountOutMin; // revert if amount out is lesser than amountOutMin
+  address[] path; // eg. (token0->token1): path[0] = token0, path[1] = token1
+  bool payerIsUser; // if true, transfer token from sender, else take token from contract
+}
+```
+ 
+### V2_SWAP_EXACT_OUT
+ 
+Perform a exactOut swap with PCS v2 pool
+ 
+```
+{
+  address recipient; // recipient of output token 
+  uint256 amountOut; // amountOut 
+  uint256 amountInMax; // revert if amountIn is more than amountInMax
+  address[] path; // eg. (token0->token1): path[0] = token0, path[1] = token1
+  bool payerIsUser; // if true, transfer token from sender, else take token from contract
+}
+```
+ 
+### PERMIT2_PERMIT
+ 
+Allow users to approve token allowances in a single transaction.
+ 
+```
+{
+  IAllowanceTransfer.PermitSingle calldata permitSingle; // see IAllowanceTransfer for struct detail 
+  bytes calldata data; // signature for the permit 
+}
+```
+ 
+### WRAP_ETH
+ 
+Convert Ether (ETH) into Wrapped Ether (WETH)
+ 
+```
+{
+  address recipient; // recipient after conversion 
+  uint256 amount; // revert if amount to wrap is less than amount
+}
+```
+ 
+### UNWRAP_WETH
+ 
+Convert Wrapped ETH (WETH) into Ether (ETH)
+ 
+```
+{
+  address recipient; // recipient after conversion 
+  uint256 amountMin; // revert if ETH amount in contract is less than  amountMin
+}
+```
+ 
+### PERMIT2_TRANSFER_FROM_BATCH
+ 
+Facilitate batch transfer of ERC-20 tokens using the Permit2 smart contract.
+ 
+```
+{
+  // see IAllowanceTransfer for struct detail 
+  IAllowanceTransfer.AllowanceTransferDetails[] calldata batchDetails;
+}
+```
+ 
+### BALANCE_CHECK_ERC20
+ 
+Verify the balance of a specific ERC-20 token held by an address
+ 
+```
+{
+  address owner; // address to check 
+  address token; // token to check 
+  uint256 minBalance; // revert if token.balanceOf(owner) <= minBalance
+}
+```
+ 
+### INFI_SWAP
+ 
+Perform a swap on Infinity - see example of performing a swap below.
+ 
+```
+{
+    bytes payload;
+}
+```
+ 
+### V3_POSITION_MANAGER_PERMIT
+ 
+Approve an NFT. This should only be used for v3 to Infinity migration. If only this command is done, it means others can decrease your v3 NFT liquidity and take your token.
+ 
+```
+{
+    bytes data; 
+}
+ 
+data = abi.encodeWithSelector(IERC721Permit.permit.selector, 
+  address spender, uint256 deadline, uint8 v, bytes32 r, bytes32 s);
+ 
+```
+ 
+### V3_POSITION_MANAGER_CALL
+ 
+Make a call to v3 NonFungiblePositionManager. The only methods available to call are decreaseLiquidity, collect and burn.
+ 
+```
+{
+    bytes data;
+}
+ 
+// 'data' varies depending on which method of the v3 NonFungiblePositionManager is being called
+ 
+// example 1: decrease
+IV3NonfungiblePositionManager.DecreaseLiquidityParams memory decreaseParams = 
+    IV3NonfungiblePositionManager.DecreaseLiquidityParams({
+        tokenId: tokenId,
+        liquidity: liquidity,
+        amount0Min: 0,
+        amount1Min: 0,
+        deadline: block.timestamp
+    });
+input[i] = abi.encodeWithSelector(IV3NonfungiblePositionManager.decreaseLiquidity.selector, decreaseParams);
+ 
+// example 2: collect
+IV3NonfungiblePositionManager.CollectParams memory collectParam = 
+    IV3NonfungiblePositionManager.CollectParams({
+        tokenId: v3TokenId,
+        recipient: address(router),
+        amount0Max: type(uint128).max,
+        amount1Max: type(uint128).max
+    });
+input[i] = abi.encodeWithSelector(IV3NonfungiblePositionManager.collect.selector, collectParam);
+```
+ 
+### INFI_CL_POSITION_CALL
+ 
+Make a call to Infinity cl position manager.
+ 
+```
+{
+    bytes data;
+}
+ 
+// 'data' varies depending on which action of Infinity position manager
+ 
+// example: calling CL MINT_POSITION action
+PoolKey memory clPoolKey;
+int24 tickLower;
+int24 tickUpper;
+Plan memory planner = Planner.init();
+planner.add(Actions.CL_MINT_POSITION, abi.encode(clPoolKey, tickLower, tickUpper, 1 ether, 10 ether, 10 ether, alice, ""));
+// remember to add settlement action   
+ 
+input[i] = abi.encodeWithSelector(IPositionManager.modifyLiquidities.selector, planner.encode(), block.timestamp);
+```
+ 
+### INFI_BIN_POSITION_CALL
+ 
+Make a call to Infinity BinPositionManager.
+ 
+```
+{
+    bytes data;
+}
+ 
+// 'data' varies depending on which action of Infinity position manager
+ 
+// example: calling BIN_ADD_LIQUIDITY action: 
+Plan memory planner = Planner.init();
+// addParam would be IBinPositionManager.BinAddLiquidityParams
+planner.add(Actions.BIN_ADD_LIQUIDITY, abi.encode(addParams));
+// remember to add settlement action 
+ 
+input[i] = abi.encodeWithSelector(IPositionManager.modifyLiquidities.selector, planner.encode(), block.timestamp);
+```
+ 
+### STABLE_SWAP_EXACT_IN
+ 
+Perform an exactIn with PCS StableSwap
+ 
+```
+{
+    address recipient; // recipient of output token
+    uint256 amountIn; // amountIn 
+    uint256 amountOutMin; // revert if amount out is lesser than amountOutMin
+    address[] path; // eg. (token0->token1): path[0] = token0, path[1] = token1
+    uint256[] flag; // eg. flag[0] = 2 indicate StableSwapTwoPool, 3 = indicate StableSwapThreePool
+    bool payerIsUser; // if true, transfer token from sender, else take token from contract
+}
+```
+ 
+### STABLE_SWAP_EXACT_OUT
+ 
+Perform an exactOut with PCS StableSwap
+ 
+```
+{
+    address recipient; // recipient of output token 
+    uint256 amountOut; // amountOut 
+    uint256 amountInMax; // revert if amountIn is more than amountInMax
+    address[] path; // eg. (token0->token1): path[0] = token0, path[1] = token1
+    uint256[] flag; // eg. flag[0] = 2 indicate StableSwapTwoPool, 3 = indicate StableSwapThreePool
+    bool payerIsUser; // if true, transfer token from sender, else take token from contract
+}
+```
+ 
+## 4. Example of performing a swap in Infinity
+ 
+When performing a swap in Infinity, the command to use is: `INFI_SWAP`
+ 
+For both CL and Bin pool, the following are supported:
+ 
+- exactInSingle and exactIn (for multi-hop) 
+- exactOutSingle and exactOut (for multi-hop) 
+ 
+For details on the parameters required for each swap type refer to [CLRouterBase.sol](https://github.com/pancakeswap/infinity-periphery/blob/main/src/pool-cl/interfaces/ICLRouterBase.sol) for the concentrated liquidity pool and [IBinRouterBase](https://github.com/pancakeswap/infinity-periphery/blob/main/src/pool-bin/interfaces/IBinRouterBase.sol) for the Bin pools.
+ 
+---
+ 
+For the examples below:
+ 
+- Assume permit2 approval has been given, and the smart contract is trying to call universal router to swap. 
+- We will use [Planner](https://github.com/pancakeswap/infinity-periphery/blob/main/src/libraries/Planner.sol) which is a helper class to build actions for Infinity. 
+ 
+**Example 1** : Swap exactInSingle with CL pool type
+ 
+```
+// step 1: build the Infinity swap param 
+ICLRouterBase.CLSwapExactInputSingleParams memory params =
+    ICLRouterBase.CLSwapExactInputSingleParams({
+        poolKey: poolKey, // struct which determine the poolKey 
+        zeroForOne: true, // if true, means 0->1 else 1->0
+        amountIn: amountIn, // amountIn 
+        amountOutMinimum: 0, // minAmountOut, ideally it should not be 0 
+        hookData: "" // hook data 
+    });
+ 
+// Step 2: build the Infinity payload 
+Plan plan = Planner.init();
+plan.add(Actions.CL_SWAP_EXACT_IN_SINGLE, abi.encode(params));
+bytes memory data = plan.finalizeSwap(poolKey.currency0, poolKey.currency1, ActionConstants.MSG_SENDER);
+ 
+// step 3: build command/input 
+bytes memory commands = abi.encodePacked(bytes1(uint8(Commands.INFI_SWAP)));
+bytes[] memory inputs = new bytes[](1);
+inputs[0] = data;
+ 
+// Step 4: call universal router 
+router.execute(commands, inputs);
+```
+ 
+**Example 2** Swap exactInSingle with 2 pool type
+ 
+Swap includes:
+ 
+- Swap exactInSingle token0 -> token1 via CL 
+- Swap exactInSingle token1 -> token2 via Bin 
+ 
+```
+// step 1: build the Infinity swap param 
+ICLRouterBase.CLSwapExactInputSingleParams memory clParam =
+    ICLRouterBase.CLSwapExactInputSingleParams({
+        poolKey: poolKey0, // struct which determine the poolKey 
+        zeroForOne: true, // if true means 0->1 else 1->0
+        amountIn: amountIn, // amountIn 
+        amountOutMinimum: 0, // minAmountOut, ideally it should not be 0 
+        hookData: "" // hook data 
+    });
+ 
+IBinRouterBase.BinSwapExactInputSingleParams memory binParam =
+    IBinRouterBase.BinSwapExactInputSingleParams({
+        poolKey: poolKey1, // struct which determine the poolKey 
+        swapForY: true, // if true means 0->1 else 1->0
+        amountIn: ActionConstants.OPEN_DELTA, 
+        amountOutMinimum: 0, // minAmountOut, ideally it should not be 0 
+        hookData: "" // hook data 
+    });
+ 
+// step 2: build the Infinity payload with CL token0->token1 and Bin token1->token2    
+Plan plan = Planner.init();
+plan.add(Actions.CL_SWAP_EXACT_IN_SINGLE, abi.encode(clParam));
+plan.add(Actions.BIN_SWAP_EXACT_IN_SINGLE, abi.encode(binParam));
+bytes memory data = plan.finalizeSwap(poolKey0.currency0, poolKey1.currency1, ActionConstants.MSG_SENDER);
+ 
+// step 3: build command/input 
+bytes memory commands = abi.encodePacked(bytes1(uint8(Commands.INFI_SWAP)));
+bytes[] memory inputs = new bytes[](1);
+inputs[0] = data;
+ 
+// Step 4: call universal router 
+router.execute(commands, inputs);
+```
