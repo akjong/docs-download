@@ -1,6 +1,5 @@
 """Core scraper module for Vocs-based documentation (PancakeSwap Infinity)."""
 
-import asyncio
 import os
 import re
 from dataclasses import dataclass
@@ -63,6 +62,10 @@ def _tag_to_markdown(element: Tag, base_url: str) -> str:
                 text = child.get_text(strip=True)
                 if text:
                     result.append(f"\n##### {text}\n")
+            elif tag_name == "h6":
+                text = child.get_text(strip=True)
+                if text:
+                    result.append(f"\n###### {text}\n")
             elif tag_name == "p":
                 inner = _tag_to_markdown(child, base_url)
                 if inner.strip():
@@ -151,10 +154,7 @@ class PancakeSwapScraper:
         """Fetch a page and return its HTML content."""
         try:
             headers = {
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36"
-                )
+                "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
             }
             resp = await client.get(
                 url, headers=headers, timeout=self.config.timeout, follow_redirects=True
@@ -218,7 +218,7 @@ class PancakeSwapScraper:
         base_path = self.config.base_path
 
         if path.startswith(base_path):
-            relative = path[len(base_path):].strip("/")
+            relative = path[len(base_path) :].strip("/")
         else:
             relative = path.strip("/")
 
@@ -261,9 +261,7 @@ class PancakeSwapScraper:
             failed = 0
 
             for i, url in enumerate(all_urls, 1):
-                console.print(
-                    f"[cyan][{i}/{len(all_urls)}][/cyan] {url}"
-                )
+                console.print(f"[cyan][{i}/{len(all_urls)}][/cyan] {url}")
                 page_html = await self._fetch_page(client, url)
                 if not page_html:
                     failed += 1
@@ -271,9 +269,7 @@ class PancakeSwapScraper:
 
                 content = self._extract_article_content(page_html, url)
                 if not content:
-                    console.print(
-                        "  [yellow]Warning: No article content found[/yellow]"
-                    )
+                    console.print("  [yellow]Warning: No article content found[/yellow]")
                     failed += 1
                     continue
 
@@ -289,6 +285,5 @@ class PancakeSwapScraper:
 
             console.print()
             console.print(
-                f"[bold green]Done![/bold green] "
-                f"Downloaded: {downloaded}, Failed: {failed}"
+                f"[bold green]Done![/bold green] Downloaded: {downloaded}, Failed: {failed}"
             )

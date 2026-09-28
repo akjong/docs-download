@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import os
 from dataclasses import dataclass
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup

@@ -1,7 +1,6 @@
 """CLI module for Manus blog scraper."""
 
 import asyncio
-import os
 
 import click
 from rich.console import Console
@@ -112,7 +111,7 @@ def main(base_url: str, output: str, concurrency: int, skip_existing: bool, verb
         asyncio.run(scraper.run(ARTICLE_SLUGS))
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")
-        raise click.Abort()
+        raise click.Abort() from None
 
 
 if __name__ == "__main__":
