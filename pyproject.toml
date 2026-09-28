@@ -11,11 +11,11 @@ dependencies = [
     "httpx[socks]>=0.28.1",
     "beautifulsoup4>=4.15.0",
     "rich>=15.0.0",
-    "click>=8.4.1",
-    "markdown>=3.10.2",
+    "click>=8.5.0",
+    "markdown>=3.11",
     "html2text>=2025.4.15",
-    "markdownify>=0.14.1",
-    "playwright>=1.60.0",
+    "markdownify>=1.2.3",
+    "playwright>=1.63.0",
 ]
 
 [project.scripts]
@@ -34,11 +34,11 @@ bitget-download = "bitget_download.cli:main"
 
 [dependency-groups]
 dev = [
-    "ruff>=0.15.18",
+    "ruff>=0.16.0",
 ]
 
 [build-system]
-requires = ["uv_build>=0.9.25,<0.10.0"]
+requires = ["uv_build>=0.12.19,<0.13"]
 build-backend = "uv_build"
 
 [tool.ruff]
