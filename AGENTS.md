@@ -122,8 +122,8 @@ class ScraperConfig:
     concurrency: int = 10
     timeout: float = 30.0
 
-async def _download(self, url: str) -> tuple[bytes, str] | None:
-    ...
+
+async def _download(self, url: str) -> tuple[bytes, str] | None: ...
 ```
 
 ### Error Handling

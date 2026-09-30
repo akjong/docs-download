@@ -1,6 +1,4 @@
 import asyncio
-import os
-import re
 from pathlib import Path
 
 import httpx
@@ -13,7 +11,9 @@ async def download_blogs(urls: list[str], output_dir: str) -> None:
 
     async def download(url: str) -> None:
         async with semaphore:
-            async with httpx.AsyncClient(headers={"Accept": "text/markdown"}, follow_redirects=True) as client:
+            async with httpx.AsyncClient(
+                headers={"Accept": "text/markdown"}, follow_redirects=True
+            ) as client:
                 try:
                     response = await client.get(url)
                     response.raise_for_status()

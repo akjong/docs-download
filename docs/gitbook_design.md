@@ -243,6 +243,7 @@ Using a combination of markdownify library with custom filters:
 ```python
 from markdownify import markdownify as md
 
+
 def html_to_markdown(html_content, base_url):
     # Convert HTML to Markdown
     markdown = md(
@@ -250,10 +251,10 @@ def html_to_markdown(html_content, base_url):
         heading_style="ATX",
         code_language_callback=detect_code_language,
     )
-    
+
     # Clean up extra whitespace
-    markdown = re.sub(r'\n{3,}', '\n\n', markdown)
-    
+    markdown = re.sub(r"\n{3,}", "\n\n", markdown)
+
     return markdown.strip()
 ```
 
