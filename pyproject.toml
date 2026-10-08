@@ -35,7 +35,7 @@ pancakeswap-download = "pancakeswap_download.cli:main"
 
 [dependency-groups]
 dev = [
-    "ruff>=0.16.0",
+    "ruff>=0.16.10",
 ]
 
 [build-system]
